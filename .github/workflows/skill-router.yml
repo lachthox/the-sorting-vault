@@ -28,7 +28,7 @@ jobs:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     env:
-      REPORT_FILE: ${{ runner.temp }}/skill-routing-report.md
+      REPORT_FILE: /tmp/skill-routing-report.md
     steps:
       - name: Checkout
         uses: actions/checkout@v4

@@ -40,8 +40,8 @@ jobs:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     env:
-      REPORT_FILE: ${{ runner.temp }}/skill-security-sweep-report.md
-      FINDINGS_FILE: ${{ runner.temp }}/skill-security-findings.json
+      REPORT_FILE: /tmp/skill-security-sweep-report.md
+      FINDINGS_FILE: /tmp/skill-security-findings.json
     steps:
       - name: Checkout
         uses: actions/checkout@v4
