@@ -114,3 +114,17 @@ Supported explicit categories:
 - `Tooling`
 - `WorkflowAutomation`
 - `Reference`
+
+## Import Skills From Other Repositories
+
+Use the importer CLI to ingest skills that contain either `SKILL.md` or `SKILLS.md`.
+Imported folders are copied into `SkillsLobby/`, then passed through the same security + quality + routing flow.
+
+Examples:
+
+- Import from a local repo path and apply routing:
+  - `python .github/scripts/import_skill_repos.py C:\path\to\skills-repo`
+- Import from multiple sources, but preview routing only:
+  - `python .github/scripts/import_skill_repos.py https://github.com/org/repo-a.git https://github.com/org/repo-b.git --route-dry-run`
+- Import only (skip routing):
+  - `python .github/scripts/import_skill_repos.py C:\path\to\skills-repo --skip-route`
