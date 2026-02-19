@@ -1,0 +1,45 @@
+name: Skill Router
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "Incoming/**"
+      - ".github/scripts/route_skills.py"
+      - ".github/workflows/skill-router.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  route:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Route uploaded skills
+        run: python .github/scripts/route_skills.py
+
+      - name: Commit and push routed skills
+        run: |
+          if git diff --quiet; then
+            echo "No routing changes."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: auto-route uploaded skills [skip ci]"
+          git push
