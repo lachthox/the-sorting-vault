@@ -1,0 +1,15 @@
+skills
+playbooks
+knowledge-base
+automation
+best-practices
+workflow-automation
+skill-library
+reusable-components
+github-actions
+ci-cd
+security-scanning
+prompt-injection
+skill-routing
+development-guidelines
+engineering-standards
