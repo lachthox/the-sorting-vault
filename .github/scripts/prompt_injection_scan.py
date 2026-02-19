@@ -59,7 +59,8 @@ HARD_FAIL_RULES = {
         r"\b(cat|read|open|copy|upload|print)\b[\s\W]{0,50}(\.\./|/etc/passwd|~/.ssh|id_rsa|\.env)",
     ],
     "remote_payload_execution": [
-        r"\b(curl|wget|invoke-webrequest)\b[\s\W]{0,80}\|\s*(bash|sh|powershell|pwsh)\b",
+        r"\b(?:curl|wget|invoke-webrequest|invoke-restmethod|iwr)\b[\s\S]{0,220}\|\s*(?:sudo\s+)?(?:bash|sh|powershell|pwsh)\b",
+        r"\b(?:sudo\s+)?(?:bash|sh|powershell|pwsh)\b[\s\W]{0,45}-c\b[\s\S]{0,80}\$\(?(?:curl|wget|invoke-webrequest|invoke-restmethod|iwr)\b",
         r"\b(powershell|pwsh)\b[\s\W]{0,30}-enc(odedcommand)?\b",
     ],
 }
@@ -70,16 +71,20 @@ SIGNAL_RULES = {
             r"\b(ignore|disregard|forget|override)\b[\s\W]{0,60}\b(previous|prior|earlier|all)\b[\s\W]{0,30}\b(instructions?|rules?|guidance)\b",
             r"\b(new instructions?|latest instructions?)\b[\s\W]{0,30}\b(overrule|replace|supersede)\b",
         ],
-        "max_points": 20,
-        "hit_points": 10,
+        "max_points": 30,
+        "hit_points": 30,
     },
     "sensitive_command_language": {
         "patterns": [
-            r"\b(rm\s+-rf|del\s+/f|format\s+[a-z]:|curl\s+http|wget\s+http|invoke-webrequest)\b",
+            r"\b(rm\s+-rf|del\s+/f|format\s+[a-z]:)\b",
+            r"\b(curl|wget)\b[\s\S]{0,220}\|\s*(?:sudo\s+)?(?:bash|sh|powershell|pwsh)\b",
+            r"\b(invoke-webrequest|invoke-restmethod|iwr)\b[\s\S]{0,220}\|\s*(?:powershell|pwsh)\b",
+            r"\b(curl|wget)\s+https?://\S+",
+            r"\b(invoke-webrequest|invoke-restmethod|iwr)\s+https?://\S+",
             r"\b(exec|execute|run)\b[\s\W]{0,30}\b(shell|terminal|powershell|bash)\b",
         ],
-        "max_points": 15,
-        "hit_points": 7,
+        "max_points": 40,
+        "hit_points": 16,
     },
     "path_breakout_hints": {
         "patterns": [
@@ -87,16 +92,16 @@ SIGNAL_RULES = {
             r"\b(/etc/passwd|/root/|~/.ssh|id_rsa|\.env)\b",
             r"\b(secrets?|credentials?|tokens?)\b[\s\W]{0,20}\b(file|folder|directory|path)\b",
         ],
-        "max_points": 15,
-        "hit_points": 6,
+        "max_points": 30,
+        "hit_points": 30,
     },
     "structural_anomaly": {
         "patterns": [
             r"(?s)<!--.{0,300}(ignore|override|bypass|disable).{0,300}-->",
             r"\u200b|\u200c|\u200d|\ufeff",
         ],
-        "max_points": 10,
-        "hit_points": 5,
+        "max_points": 30,
+        "hit_points": 30,
     },
     "obfuscated_override": {
         "patterns": [
@@ -194,6 +199,7 @@ def extract_snippet(text: str, start: int, end: int, context: int = 55) -> str:
     left = max(start - context, 0)
     right = min(end + context, len(text))
     snippet = text[left:right].replace("\n", " ")
+    snippet = re.sub(r"[\u200b\u200c\u200d\ufeff]", "", snippet)
     return re.sub(r"\s+", " ", snippet).strip()
 
 
@@ -257,7 +263,7 @@ def detect_encoded_payload_signal(
     score = 0
     snippets: list[str] = []
 
-    base64_candidates = re.findall(r"\b[A-Za-z0-9+/]{80,}={0,2}\b", text)
+    base64_candidates = re.findall(r"\b[A-Za-z0-9+/]{40,}={0,2}\b", text)
     for candidate in base64_candidates[:8]:
         if is_allowlisted(candidate, allowlist_phrases):
             continue
@@ -267,7 +273,7 @@ def detect_encoded_payload_signal(
         except Exception:
             decoded_text = ""
         if any(keyword in decoded_text for keyword in ENCODED_KEYWORDS):
-            score = max(score, 30)
+            score = max(score, 35)
             snippets.append("encoded_payload: base64 payload decodes to suspicious instruction keywords.")
             continue
 
@@ -275,8 +281,8 @@ def detect_encoded_payload_signal(
         if entropy < 3.7:
             continue
 
-        if len(candidate) >= 140:
-            score = max(score, 12)
+        if len(candidate) >= 72:
+            score = max(score, 30)
             snippets.append("encoded_payload: high-entropy base64-like string present.")
 
     hex_candidates = re.findall(r"\b[0-9a-fA-F]{96,}\b", text)

@@ -1,4 +1,4 @@
-# Codex Skills Hub
+# Skill Issue Hub
 
 Central repository for reusable skills and playbooks.
 
