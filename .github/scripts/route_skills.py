@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Route uploaded skills from SkillsLobby/ into the best matching category."""
+"""Gate and route uploaded skills from SkillsLobby/ into taxonomy folders."""
 
 from __future__ import annotations
 
@@ -12,7 +12,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SKILLS_LOBBY = ROOT / "SkillsLobby"
+LIMBO_REVIEW = Path("Limbo") / "NeedsHumanReview"
 FALLBACK = Path("Reference") / "Unsorted"
+WORTHY_THRESHOLD = 70
+TRIGGER_HINTS = ("use when", "when codex", "use for", "for tasks", "trigger")
 
 CATEGORY_ALIASES = {
     "bestpractices": Path("BestPractices"),
@@ -50,12 +53,156 @@ KEYWORD_RULES = [
 
 
 @dataclass
+class QualityResult:
+    worthy: bool
+    score: int
+    summary: str
+
+
+@dataclass
 class RouteResult:
     skill: str
     source: str
     destination: str
     action: str
-    reason: str
+    gate: str
+    score: int
+    gate_reason: str
+    routing_reason: str
+
+
+def unique_destination(base: Path) -> Path:
+    if not base.exists():
+        return base
+    counter = 2
+    while True:
+        candidate = base.parent / f"{base.name}-{counter}"
+        if not candidate.exists():
+            return candidate
+        counter += 1
+
+
+def split_frontmatter(content: str) -> tuple[dict[str, str], str, list[str]]:
+    """Extract frontmatter keys and markdown body."""
+    lines = content.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return {}, content, ["Frontmatter must start the file with `---`."]
+
+    closing_index = None
+    for index in range(1, len(lines)):
+        if lines[index].strip() == "---":
+            closing_index = index
+            break
+    if closing_index is None:
+        return {}, content, ["Frontmatter opening `---` is missing a closing `---`."]
+
+    frontmatter: dict[str, str] = {}
+    for line in lines[1:closing_index]:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        match = re.match(r"^([A-Za-z0-9_-]+)\s*:\s*(.*)$", line)
+        if not match:
+            continue
+        key = match.group(1).strip()
+        value = match.group(2).strip().strip('"').strip("'")
+        frontmatter[key] = value
+
+    body = "\n".join(lines[closing_index + 1 :])
+    return frontmatter, body, []
+
+
+def assess_skill_worthiness(skill_dir: Path) -> QualityResult:
+    skill_md = skill_dir / "SKILL.md"
+    if not skill_md.exists():
+        return QualityResult(
+            worthy=False,
+            score=0,
+            summary="Missing `SKILL.md`; requires human review.",
+        )
+
+    content = skill_md.read_text(encoding="utf-8", errors="ignore")
+    findings: list[str] = []
+    score = 0
+    hard_fail = False
+
+    frontmatter, body, frontmatter_issues = split_frontmatter(content)
+    if frontmatter_issues:
+        hard_fail = True
+        findings.extend(frontmatter_issues)
+    else:
+        score += 20
+
+    name = frontmatter.get("name", "").strip()
+    description = frontmatter.get("description", "").strip()
+    if name and description:
+        score += 20
+    else:
+        hard_fail = True
+        findings.append("Frontmatter must include non-empty `name` and `description`.")
+
+    if description:
+        lower_desc = description.lower()
+        if any(hint in lower_desc for hint in TRIGGER_HINTS):
+            score += 10
+        else:
+            findings.append("Description should include explicit trigger context (for example: `Use when ...`).")
+
+    if len(body.strip()) >= 80:
+        score += 15
+    else:
+        findings.append("Body content is too thin; add clear workflow guidance.")
+
+    if re.search(r"(?m)^#\s+\S+", body):
+        score += 10
+    else:
+        findings.append("Body should include a top-level `#` heading.")
+
+    if re.search(r"(?m)^##\s+\S+", body):
+        score += 10
+    else:
+        findings.append("Body should include at least one `##` section.")
+
+    line_count = len(content.splitlines())
+    if line_count <= 500:
+        score += 10
+    elif line_count <= 700:
+        score += 5
+        findings.append("SKILL.md is long (>500 lines); move details into references for progressive disclosure.")
+    else:
+        findings.append("SKILL.md exceeds 700 lines; split into focused references.")
+
+    resource_dirs = [name for name in ("scripts", "references", "assets") if (skill_dir / name).is_dir()]
+    if not resource_dirs:
+        score += 15
+    else:
+        content_lower = content.lower()
+        covered = 0
+        missing = []
+        for dirname in resource_dirs:
+            if (
+                f"{dirname}/" in content_lower
+                or f"`{dirname}`" in content_lower
+                or f"`{dirname}/`" in content_lower
+            ):
+                covered += 1
+            else:
+                missing.append(dirname)
+        score += int(round((covered / len(resource_dirs)) * 15))
+        if missing:
+            findings.append(
+                f"Resource folders exist but are not documented in SKILL.md: {', '.join(sorted(missing))}."
+            )
+
+    score = min(score, 100)
+    worthy = score >= WORTHY_THRESHOLD and not hard_fail
+
+    if worthy:
+        summary = f"Worthy ({score}/100). Passed gate."
+    else:
+        summary = f"Not worthy ({score}/100). Sent to limbo for human review."
+    if findings:
+        summary = f"{summary} Key issues: {'; '.join(findings[:3])}"
+    return QualityResult(worthy=worthy, score=score, summary=summary)
 
 
 def parse_declared_category(content: str) -> tuple[Path | None, str | None]:
@@ -94,27 +241,28 @@ def classify_category(skill_dir: Path, skill_md: Path) -> tuple[Path, str]:
     return FALLBACK, "No category declaration and no keyword hit; sent to fallback."
 
 
-def unique_destination(base: Path) -> Path:
-    if not base.exists():
-        return base
-    counter = 2
-    while True:
-        candidate = base.parent / f"{base.name}-{counter}"
-        if not candidate.exists():
-            return candidate
-        counter += 1
-
-
 def render_report(results: list[RouteResult], dry_run: bool) -> str:
+    def escape_cell(value: str) -> str:
+        return value.replace("|", "\\|").replace("\n", "<br>")
+
     header = "# Skill Routing Report"
     mode = f"Mode: {'dry-run' if dry_run else 'apply'}"
     if not results:
         return f"{header}\n\n{mode}\n\nNo skill folders were processed."
 
-    lines = [header, "", mode, "", "| Skill | Action | Destination | Reason |", "|---|---|---|---|"]
+    lines = [
+        header,
+        "",
+        mode,
+        "",
+        f"Worthy threshold: `{WORTHY_THRESHOLD}/100`",
+        "",
+        "| Skill | Gate | Score | Action | Destination | Gate Reason | Routing Reason |",
+        "|---|---|---:|---|---|---|---|",
+    ]
     for item in results:
         lines.append(
-            f"| `{item.skill}` | {item.action} | `{item.destination}` | {item.reason} |"
+            f"| `{escape_cell(item.skill)}` | {escape_cell(item.gate)} | {item.score} | {escape_cell(item.action)} | `{escape_cell(item.destination)}` | {escape_cell(item.gate_reason)} | {escape_cell(item.routing_reason)} |"
         )
     return "\n".join(lines)
 
@@ -130,52 +278,42 @@ def route_skills(dry_run: bool = False) -> tuple[int, list[RouteResult]]:
         if not skill_dir.is_dir():
             continue
 
-        skill_md = skill_dir / "SKILL.md"
-        if not skill_md.exists():
-            relative_skill = str(skill_dir.relative_to(ROOT))
-            print(f"Skipping {relative_skill} (no SKILL.md).")
-            results.append(
-                RouteResult(
-                    skill=skill_dir.name,
-                    source=relative_skill,
-                    destination=relative_skill,
-                    action="skipped",
-                    reason="Missing `SKILL.md`.",
-                )
-            )
-            continue
+        quality = assess_skill_worthiness(skill_dir)
+        source = str(skill_dir.relative_to(ROOT))
 
-        category, reason = classify_category(skill_dir, skill_md)
-        target_parent = ROOT / category
+        if quality.worthy:
+            skill_md = skill_dir / "SKILL.md"
+            destination_parent, routing_reason = classify_category(skill_dir, skill_md)
+            action_base = "move"
+        else:
+            destination_parent = LIMBO_REVIEW
+            routing_reason = "Held in limbo pending human assessment."
+            action_base = "move-to-limbo"
+
+        target_parent = ROOT / destination_parent
         target_parent.mkdir(parents=True, exist_ok=True)
-
         destination = unique_destination(target_parent / skill_dir.name)
-        relative_source = str(skill_dir.relative_to(ROOT))
-        relative_destination = str(destination.relative_to(ROOT))
+        destination_relative = str(destination.relative_to(ROOT))
 
         if dry_run:
-            print(f"[DRY-RUN] {relative_source} -> {relative_destination}")
-            results.append(
-                RouteResult(
-                    skill=skill_dir.name,
-                    source=relative_source,
-                    destination=relative_destination,
-                    action="would-move",
-                    reason=reason,
-                )
-            )
-            continue
+            print(f"[DRY-RUN] {source} -> {destination_relative}")
+            action = f"would-{action_base}"
+        else:
+            shutil.move(str(skill_dir), str(destination))
+            moved += 1
+            print(f"Moved {source} -> {destination_relative}")
+            action = action_base.replace("move", "moved", 1)
 
-        shutil.move(str(skill_dir), str(destination))
-        moved += 1
-        print(f"Moved {relative_source} -> {relative_destination}")
         results.append(
             RouteResult(
                 skill=skill_dir.name,
-                source=relative_source,
-                destination=relative_destination,
-                action="moved",
-                reason=reason,
+                source=source,
+                destination=destination_relative,
+                action=action,
+                gate="worthy" if quality.worthy else "limbo",
+                score=quality.score,
+                gate_reason=quality.summary,
+                routing_reason=routing_reason,
             )
         )
 
@@ -187,7 +325,9 @@ def route_skills(dry_run: bool = False) -> tuple[int, list[RouteResult]]:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Route skills from SkillsLobby into taxonomy folders.")
+    parser = argparse.ArgumentParser(
+        description="Gate and route skills from SkillsLobby into taxonomy folders."
+    )
     parser.add_argument("--dry-run", action="store_true", help="Do not move folders; only produce a report.")
     parser.add_argument("--report-file", type=str, help="Optional path for markdown routing report.")
     args = parser.parse_args()
