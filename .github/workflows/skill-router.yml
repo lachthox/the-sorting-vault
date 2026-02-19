@@ -7,11 +7,15 @@ on:
     paths:
       - "SkillsLobby/**"
       - ".github/scripts/route_skills.py"
+      - ".github/scripts/prompt_injection_scan.py"
+      - ".github/security/scan_allowlist.yml"
       - ".github/workflows/skill-router.yml"
   pull_request:
     paths:
       - "SkillsLobby/**"
       - ".github/scripts/route_skills.py"
+      - ".github/scripts/prompt_injection_scan.py"
+      - ".github/security/scan_allowlist.yml"
       - ".github/workflows/skill-router.yml"
   workflow_dispatch:
 

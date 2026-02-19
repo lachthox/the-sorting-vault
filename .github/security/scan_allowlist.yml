@@ -1,0 +1,6 @@
+# Lowercase snippet fragments that should not trigger prompt-injection findings.
+# Keep this list short and auditable.
+- "detect prompt injection"
+- "prompt injection example"
+- "red-team example"
+- "security training sample"

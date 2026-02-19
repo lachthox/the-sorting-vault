@@ -1,0 +1,195 @@
+name: Skill Security Sweep
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "BestPractices/**"
+      - "LanguageSpecific/**"
+      - "PlatformSpecific/**"
+      - "DesignUX/**"
+      - "Tooling/**"
+      - "WorkflowAutomation/**"
+      - "Reference/**"
+      - ".github/scripts/prompt_injection_scan.py"
+      - ".github/security/scan_allowlist.yml"
+      - ".github/workflows/skill-security-sweep.yml"
+  pull_request:
+    paths:
+      - "BestPractices/**"
+      - "LanguageSpecific/**"
+      - "PlatformSpecific/**"
+      - "DesignUX/**"
+      - "Tooling/**"
+      - "WorkflowAutomation/**"
+      - "Reference/**"
+      - ".github/scripts/prompt_injection_scan.py"
+      - ".github/security/scan_allowlist.yml"
+      - ".github/workflows/skill-security-sweep.yml"
+  schedule:
+    - cron: "15 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sweep:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    env:
+      REPORT_FILE: ${{ runner.temp }}/skill-security-sweep-report.md
+      FINDINGS_FILE: ${{ runner.temp }}/skill-security-findings.json
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build changed-file scope
+        id: scope
+        shell: bash
+        run: |
+          SCOPE_FILE="$RUNNER_TEMP/sweep-scope-paths.txt"
+          : > "$SCOPE_FILE"
+
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            BEFORE="${{ github.event.before }}"
+            if [[ -n "$BEFORE" && "$BEFORE" != "0000000000000000000000000000000000000000" ]]; then
+              git diff --name-only "$BEFORE" "${{ github.sha }}" > "$RUNNER_TEMP/changed-files.txt" || true
+            else
+              git ls-files > "$RUNNER_TEMP/changed-files.txt"
+            fi
+          elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            git fetch origin "${{ github.base_ref }}" --depth=1
+            git diff --name-only "origin/${{ github.base_ref }}...HEAD" > "$RUNNER_TEMP/changed-files.txt" || true
+          fi
+
+          if [[ -f "$RUNNER_TEMP/changed-files.txt" ]]; then
+            grep -E '^(BestPractices|LanguageSpecific|PlatformSpecific|DesignUX|Tooling|WorkflowAutomation|Reference)/' \
+              "$RUNNER_TEMP/changed-files.txt" > "$SCOPE_FILE" || true
+          fi
+
+          echo "scope_file=$SCOPE_FILE" >> "$GITHUB_OUTPUT"
+
+      - name: Sweep changed skills (PR dry-run)
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set +e
+          python .github/scripts/prompt_injection_scan.py \
+            --mode sweep \
+            --dry-run \
+            --paths-file "${{ steps.scope.outputs.scope_file }}" \
+            --report-file "$REPORT_FILE" \
+            --findings-json "$FINDINGS_FILE"
+          CODE=$?
+          set -e
+          if [[ "$CODE" -ne 0 && "$CODE" -ne 2 ]]; then
+            exit "$CODE"
+          fi
+
+      - name: Sweep changed skills (push apply)
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set +e
+          python .github/scripts/prompt_injection_scan.py \
+            --mode sweep \
+            --apply-quarantine \
+            --paths-file "${{ steps.scope.outputs.scope_file }}" \
+            --report-file "$REPORT_FILE" \
+            --findings-json "$FINDINGS_FILE"
+          CODE=$?
+          set -e
+          if [[ "$CODE" -ne 0 && "$CODE" -ne 2 ]]; then
+            exit "$CODE"
+          fi
+
+      - name: Sweep all sorted skills (scheduled apply)
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          set +e
+          python .github/scripts/prompt_injection_scan.py \
+            --mode sweep \
+            --apply-quarantine \
+            --report-file "$REPORT_FILE" \
+            --findings-json "$FINDINGS_FILE"
+          CODE=$?
+          set -e
+          if [[ "$CODE" -ne 0 && "$CODE" -ne 2 ]]; then
+            exit "$CODE"
+          fi
+
+      - name: Publish workflow summary
+        run: cat "$REPORT_FILE" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload findings artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: skill-security-findings
+          path: ${{ env.FINDINGS_FILE }}
+          if-no-files-found: ignore
+
+      - name: Comment security report on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const reportPath = process.env.REPORT_FILE;
+            const marker = '<!-- skill-security-sweep-report -->';
+            const body = `${marker}\n` + fs.readFileSync(reportPath, 'utf8');
+
+            const {owner, repo} = context.repo;
+            const issue_number = context.payload.pull_request.number;
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100
+            });
+
+            const existing = comments.find(
+              (c) => c.user?.type === 'Bot' && c.body?.includes(marker)
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body
+              });
+            }
+
+      - name: Commit and push quarantined skills
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No quarantine changes."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: quarantine risky skills from security sweep [skip ci]"
+          git push

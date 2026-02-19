@@ -15,7 +15,7 @@ Central repository for reusable skills and playbooks.
 - `WorkflowAutomation/` - Repeatable automation flows and agent-assisted pipelines.
 - `Reference/` - Shared templates, snippets, examples, and glossary material.
 - `SkillsLobby/` - Intake folder for new uploads that should be auto-routed by GitHub Actions.
-- `Limbo/NeedsHumanReview/` - Holding area for skills that fail quality checks and require manual approval.
+- `Limbo/NeedsHumanReview/` - Holding area for skills that fail quality or security checks and require manual approval.
 
 ## Suggested Skill Layout
 
@@ -38,7 +38,8 @@ Push new skill folders into `SkillsLobby/` and the `Skill Router` workflow will 
 
 Routing order:
 
-- Quality gate runs first (worthiness check).
+- Prompt-injection security gate runs first.
+- Quality gate runs second (worthiness check).
 - Explicit `Category: <value>` in `SKILL.md` (preferred).
 - Keyword-based classification from folder name + `SKILL.md` contents.
 - Fallback to `Reference/Unsorted/` when no strong match is found.
@@ -47,6 +48,35 @@ Report behavior:
 
 - On pull requests, the workflow posts/updates a comment showing exactly why each skill was routed.
 - On pushes to `main`, the workflow applies the move and writes the same routing report to the run summary.
+
+## Prompt Injection Sweeping
+
+The repository uses a Python-only scanner (`.github/scripts/prompt_injection_scan.py`) with no LLM dependency.
+
+Where it runs:
+
+- Intake: every skill in `SkillsLobby/` before sorting.
+- On-change sweep: when sorted skills are modified on `main`.
+- Scheduled sweep: nightly scan across all sorted skills.
+- PR sweep: dry-run security report comment for changed sorted skills.
+
+Risk levels:
+
+- `low` (`score < 30`) -> allowed.
+- `review` (`30 <= score < 60`) -> quarantined to limbo.
+- `high` (`score >= 60` or hard-fail rule) -> quarantined to limbo.
+
+What gets flagged:
+
+- Instruction override / policy bypass language.
+- Secret exfiltration cues.
+- Dangerous path breakout attempts.
+- Encoded payload indicators.
+- Structural anomaly signals (hidden or obfuscated instruction content).
+
+Allowlist:
+
+- Safe false-positive phrases can be tuned in `.github/security/scan_allowlist.yml`.
 
 ## Worthiness Gate Criteria
 
@@ -69,8 +99,9 @@ Decision:
 
 Manual approval flow:
 
-- To approve a limbo skill, move it back into `SkillsLobby/` and push.
+- To approve a limbo skill, remediate issues, then move it back into `SkillsLobby/` and push.
 - To reject a limbo skill, remove it from `Limbo/NeedsHumanReview/`.
+- Security-quarantined skills include `.scan-findings.json` for reviewer context.
 
 Supported explicit categories:
 

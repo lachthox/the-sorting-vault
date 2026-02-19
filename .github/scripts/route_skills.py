@@ -9,6 +9,12 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
+from prompt_injection_scan import (
+    load_allowlist_phrases,
+    scan_skill_directory,
+    write_scan_findings_file,
+)
+
 
 ROOT = Path(__file__).resolve().parents[2]
 SKILLS_LOBBY = ROOT / "SkillsLobby"
@@ -66,7 +72,9 @@ class RouteResult:
     destination: str
     action: str
     gate: str
-    score: int
+    risk_level: str
+    scan_score: int
+    quality_score: str
     gate_reason: str
     routing_reason: str
 
@@ -83,7 +91,6 @@ def unique_destination(base: Path) -> Path:
 
 
 def split_frontmatter(content: str) -> tuple[dict[str, str], str, list[str]]:
-    """Extract frontmatter keys and markdown body."""
     lines = content.splitlines()
     if not lines or lines[0].strip() != "---":
         return {}, content, ["Frontmatter must start the file with `---`."]
@@ -114,11 +121,7 @@ def split_frontmatter(content: str) -> tuple[dict[str, str], str, list[str]]:
 def assess_skill_worthiness(skill_dir: Path) -> QualityResult:
     skill_md = skill_dir / "SKILL.md"
     if not skill_md.exists():
-        return QualityResult(
-            worthy=False,
-            score=0,
-            summary="Missing `SKILL.md`; requires human review.",
-        )
+        return QualityResult(worthy=False, score=0, summary="Missing `SKILL.md`; requires human review.")
 
     content = skill_md.read_text(encoding="utf-8", errors="ignore")
     findings: list[str] = []
@@ -189,15 +192,13 @@ def assess_skill_worthiness(skill_dir: Path) -> QualityResult:
                 missing.append(dirname)
         score += int(round((covered / len(resource_dirs)) * 15))
         if missing:
-            findings.append(
-                f"Resource folders exist but are not documented in SKILL.md: {', '.join(sorted(missing))}."
-            )
+            findings.append(f"Resource folders exist but are not documented in SKILL.md: {', '.join(sorted(missing))}.")
 
     score = min(score, 100)
     worthy = score >= WORTHY_THRESHOLD and not hard_fail
 
     if worthy:
-        summary = f"Worthy ({score}/100). Passed gate."
+        summary = f"Worthy ({score}/100). Passed quality gate."
     else:
         summary = f"Not worthy ({score}/100). Sent to limbo for human review."
     if findings:
@@ -206,7 +207,6 @@ def assess_skill_worthiness(skill_dir: Path) -> QualityResult:
 
 
 def parse_declared_category(content: str) -> tuple[Path | None, str | None]:
-    """Allow explicit routing via 'Category: <value>' in SKILL.md."""
     for line in content.splitlines()[:60]:
         match = re.match(r"^\s*category\s*:\s*(.+?)\s*$", line, flags=re.IGNORECASE)
         if not match:
@@ -241,6 +241,15 @@ def classify_category(skill_dir: Path, skill_md: Path) -> tuple[Path, str]:
     return FALLBACK, "No category declaration and no keyword hit; sent to fallback."
 
 
+def summarize_security_gate(risk_level: str, scan_score: int, hard_fail_rules: list[str], evidence: list[str]) -> str:
+    rule_text = ", ".join(hard_fail_rules) if hard_fail_rules else "none"
+    evidence_text = evidence[0] if evidence else "no evidence snippet captured"
+    return (
+        f"Prompt injection scanner flagged risk `{risk_level}` ({scan_score}/100). "
+        f"Hard-fail rules: {rule_text}. Evidence: {evidence_text}"
+    )
+
+
 def render_report(results: list[RouteResult], dry_run: bool) -> str:
     def escape_cell(value: str) -> str:
         return value.replace("|", "\\|").replace("\n", "<br>")
@@ -255,14 +264,17 @@ def render_report(results: list[RouteResult], dry_run: bool) -> str:
         "",
         mode,
         "",
-        f"Worthy threshold: `{WORTHY_THRESHOLD}/100`",
+        f"Quality worthy threshold: `{WORTHY_THRESHOLD}/100`",
+        "Security thresholds are enforced by `prompt_injection_scan.py` (review >= 30, high >= 60, hard-fail immediate).",
         "",
-        "| Skill | Gate | Score | Action | Destination | Gate Reason | Routing Reason |",
-        "|---|---|---:|---|---|---|---|",
+        "| Skill | Gate | Risk | Scan | Quality | Action | Destination | Gate Reason | Routing Reason |",
+        "|---|---|---|---:|---:|---|---|---|---|",
     ]
     for item in results:
         lines.append(
-            f"| `{escape_cell(item.skill)}` | {escape_cell(item.gate)} | {item.score} | {escape_cell(item.action)} | `{escape_cell(item.destination)}` | {escape_cell(item.gate_reason)} | {escape_cell(item.routing_reason)} |"
+            f"| `{escape_cell(item.skill)}` | {escape_cell(item.gate)} | {escape_cell(item.risk_level)} | "
+            f"{item.scan_score} | {escape_cell(item.quality_score)} | {escape_cell(item.action)} | "
+            f"`{escape_cell(item.destination)}` | {escape_cell(item.gate_reason)} | {escape_cell(item.routing_reason)} |"
         )
     return "\n".join(lines)
 
@@ -274,21 +286,42 @@ def route_skills(dry_run: bool = False) -> tuple[int, list[RouteResult]]:
 
     moved = 0
     results: list[RouteResult] = []
+    allowlist_phrases = load_allowlist_phrases()
+
     for skill_dir in sorted(SKILLS_LOBBY.iterdir()):
         if not skill_dir.is_dir():
             continue
 
-        quality = assess_skill_worthiness(skill_dir)
         source = str(skill_dir.relative_to(ROOT))
+        scan_finding = scan_skill_directory(skill_dir, allowlist_phrases=allowlist_phrases)
 
-        if quality.worthy:
-            skill_md = skill_dir / "SKILL.md"
-            destination_parent, routing_reason = classify_category(skill_dir, skill_md)
-            action_base = "move"
-        else:
+        if scan_finding.recommended_action == "quarantine":
             destination_parent = LIMBO_REVIEW
-            routing_reason = "Held in limbo pending human assessment."
+            gate = "security-limbo"
+            quality_score = "n/a"
+            gate_reason = summarize_security_gate(
+                risk_level=scan_finding.risk_level,
+                scan_score=scan_finding.score_total,
+                hard_fail_rules=scan_finding.hard_fail_rules_triggered,
+                evidence=scan_finding.evidence_snippets,
+            )
+            routing_reason = "Prompt injection risk requires human approval before sorting."
             action_base = "move-to-limbo"
+        else:
+            quality = assess_skill_worthiness(skill_dir)
+            quality_score = str(quality.score)
+            gate_reason = quality.summary
+
+            if quality.worthy:
+                skill_md = skill_dir / "SKILL.md"
+                destination_parent, routing_reason = classify_category(skill_dir, skill_md)
+                gate = "worthy"
+                action_base = "move"
+            else:
+                destination_parent = LIMBO_REVIEW
+                routing_reason = "Failed quality gate; waiting for human review."
+                gate = "quality-limbo"
+                action_base = "move-to-limbo"
 
         target_parent = ROOT / destination_parent
         target_parent.mkdir(parents=True, exist_ok=True)
@@ -303,6 +336,8 @@ def route_skills(dry_run: bool = False) -> tuple[int, list[RouteResult]]:
             moved += 1
             print(f"Moved {source} -> {destination_relative}")
             action = action_base.replace("move", "moved", 1)
+            if gate == "security-limbo":
+                write_scan_findings_file(destination, scan_finding)
 
         results.append(
             RouteResult(
@@ -310,9 +345,11 @@ def route_skills(dry_run: bool = False) -> tuple[int, list[RouteResult]]:
                 source=source,
                 destination=destination_relative,
                 action=action,
-                gate="worthy" if quality.worthy else "limbo",
-                score=quality.score,
-                gate_reason=quality.summary,
+                gate=gate,
+                risk_level=scan_finding.risk_level,
+                scan_score=scan_finding.score_total,
+                quality_score=quality_score,
+                gate_reason=gate_reason,
                 routing_reason=routing_reason,
             )
         )
@@ -325,9 +362,7 @@ def route_skills(dry_run: bool = False) -> tuple[int, list[RouteResult]]:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Gate and route skills from SkillsLobby into taxonomy folders."
-    )
+    parser = argparse.ArgumentParser(description="Gate and route skills from SkillsLobby into taxonomy folders.")
     parser.add_argument("--dry-run", action="store_true", help="Do not move folders; only produce a report.")
     parser.add_argument("--report-file", type=str, help="Optional path for markdown routing report.")
     args = parser.parse_args()
