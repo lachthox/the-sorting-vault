@@ -5,18 +5,26 @@ on:
     branches:
       - main
     paths:
-      - "Incoming/**"
+      - "SkillsLobby/**"
+      - ".github/scripts/route_skills.py"
+      - ".github/workflows/skill-router.yml"
+  pull_request:
+    paths:
+      - "SkillsLobby/**"
       - ".github/scripts/route_skills.py"
       - ".github/workflows/skill-router.yml"
   workflow_dispatch:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   route:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
+    env:
+      REPORT_FILE: ${{ runner.temp }}/skill-routing-report.md
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,10 +36,59 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Route uploaded skills
-        run: python .github/scripts/route_skills.py
+      - name: Route uploaded skills (PR dry-run)
+        if: github.event_name == 'pull_request'
+        run: python .github/scripts/route_skills.py --dry-run --report-file "$REPORT_FILE"
+
+      - name: Route uploaded skills (apply)
+        if: github.event_name != 'pull_request'
+        run: python .github/scripts/route_skills.py --report-file "$REPORT_FILE"
+
+      - name: Publish workflow summary
+        run: cat "$REPORT_FILE" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Comment routing report on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const reportPath = process.env.REPORT_FILE;
+            const marker = '<!-- skill-router-report -->';
+            const body = `${marker}\n` + fs.readFileSync(reportPath, 'utf8');
+
+            const {owner, repo} = context.repo;
+            const issue_number = context.payload.pull_request.number;
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100
+            });
+
+            const existing = comments.find(
+              (c) => c.user?.type === 'Bot' && c.body?.includes(marker)
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body
+              });
+            }
 
       - name: Commit and push routed skills
+        if: github.event_name != 'pull_request'
         run: |
           if git diff --quiet; then
             echo "No routing changes."

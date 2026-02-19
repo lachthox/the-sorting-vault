@@ -14,7 +14,7 @@ Central repository for reusable skills and playbooks.
 - `Tooling/` - IDE, CLI, CI/CD, and infrastructure tool workflows.
 - `WorkflowAutomation/` - Repeatable automation flows and agent-assisted pipelines.
 - `Reference/` - Shared templates, snippets, examples, and glossary material.
-- `Incoming/` - Intake folder for new uploads that should be auto-routed by GitHub Actions.
+- `SkillsLobby/` - Intake folder for new uploads that should be auto-routed by GitHub Actions.
 
 ## Suggested Skill Layout
 
@@ -33,13 +33,18 @@ Each skill folder can follow:
 
 ## Auto Routing
 
-Push new skill folders into `Incoming/` and the `Skill Router` workflow will move each folder into the best match.
+Push new skill folders into `SkillsLobby/` and the `Skill Router` workflow will move each folder into the best match.
 
 Routing order:
 
 - Explicit `Category: <value>` in `SKILL.md` (preferred).
 - Keyword-based classification from folder name + `SKILL.md` contents.
 - Fallback to `Reference/Unsorted/` when no strong match is found.
+
+Report behavior:
+
+- On pull requests, the workflow posts/updates a comment showing exactly why each skill was routed.
+- On pushes to `main`, the workflow applies the move and writes the same routing report to the run summary.
 
 Supported explicit categories:
 
