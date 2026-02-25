@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>The Sorting Vault - Out of Limbo</title>
+  <meta name="description" content="Browse skills that passed quality and security gates and made it out of limbo.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="surface-glow surface-glow-a"></div>
+  <div class="surface-glow surface-glow-b"></div>
+
+  <main class="page">
+    <header class="hero">
+      <p class="eyebrow">THE SORTING VAULT</p>
+      <h1>Skills Out of Limbo</h1>
+      <p class="lead">
+        This list includes skills routed into the live taxonomy folders. Anything still in
+        <code>Limbo/NeedsHumanReview</code> is intentionally excluded.
+      </p>
+
+      <div class="stats" id="stats">
+        <div class="stat-card">
+          <span class="stat-label">Skills</span>
+          <strong id="totalSkills">-</strong>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Categories</span>
+          <strong id="totalCategories">-</strong>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Generated</span>
+          <strong id="generatedAt">-</strong>
+        </div>
+      </div>
+    </header>
+
+    <section class="controls">
+      <label>
+        <span>Search</span>
+        <input id="searchInput" type="search" placeholder="Filter by name, description, or path">
+      </label>
+      <label>
+        <span>Category</span>
+        <select id="categorySelect">
+          <option value="">All categories</option>
+        </select>
+      </label>
+    </section>
+
+    <section id="feedback" class="feedback" role="status"></section>
+    <section id="grid" class="grid" aria-live="polite"></section>
+  </main>
+</body>
+</html>

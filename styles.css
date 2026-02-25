@@ -1,0 +1,248 @@
+:root {
+  --bg: #f3efe6;
+  --bg-accent: #ece6d8;
+  --ink: #1f1a17;
+  --ink-soft: #5d5348;
+  --card: #fffdf8;
+  --line: #d7cbb8;
+  --sun: #f19a4b;
+  --teal: #1e6c64;
+  --font-main: "Space Grotesk", "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", "Consolas", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: var(--font-main);
+  background: radial-gradient(circle at 15% 12%, #ffe6c2 0%, transparent 40%),
+    radial-gradient(circle at 85% 22%, #ccece9 0%, transparent 42%),
+    linear-gradient(135deg, var(--bg), var(--bg-accent));
+  color: var(--ink);
+  position: relative;
+  overflow-x: hidden;
+}
+
+.surface-glow {
+  position: fixed;
+  width: 26rem;
+  height: 26rem;
+  border-radius: 50%;
+  filter: blur(60px);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.surface-glow-a {
+  right: -8rem;
+  top: -7rem;
+  background: rgba(241, 154, 75, 0.28);
+}
+
+.surface-glow-b {
+  left: -10rem;
+  bottom: -8rem;
+  background: rgba(30, 108, 100, 0.22);
+}
+
+.page {
+  position: relative;
+  z-index: 1;
+  width: min(1100px, 92vw);
+  margin: 0 auto;
+  padding: 3rem 0 4rem;
+}
+
+.hero h1 {
+  margin: 0.3rem 0 0.8rem;
+  font-size: clamp(2rem, 3vw, 3.2rem);
+  line-height: 1.06;
+}
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  letter-spacing: 0.14em;
+  color: var(--teal);
+  margin: 0;
+}
+
+.lead {
+  margin: 0;
+  max-width: 72ch;
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
+
+code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: rgba(31, 26, 23, 0.08);
+  padding: 0.15em 0.4em;
+  border-radius: 0.35rem;
+}
+
+.stats {
+  margin-top: 1.3rem;
+  display: grid;
+  gap: 0.8rem;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.stat-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 0.8rem;
+  padding: 0.9rem 1rem;
+  box-shadow: 0 10px 25px rgba(41, 34, 27, 0.08);
+}
+
+.stat-label {
+  display: block;
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+  margin-bottom: 0.3rem;
+}
+
+.stat-card strong {
+  font-size: 1rem;
+}
+
+.controls {
+  margin-top: 1.2rem;
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: 1fr 280px;
+}
+
+.controls label {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 0.8rem;
+  padding: 0.65rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.controls span {
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+}
+
+input,
+select {
+  appearance: none;
+  border: 1px solid #bda88a;
+  border-radius: 0.5rem;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  padding: 0.55rem 0.62rem;
+}
+
+input:focus,
+select:focus {
+  outline: 2px solid rgba(30, 108, 100, 0.45);
+  outline-offset: 1px;
+  border-color: var(--teal);
+}
+
+.feedback {
+  min-height: 1.3rem;
+  margin-top: 0.8rem;
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+}
+
+.grid {
+  margin-top: 0.4rem;
+  display: grid;
+  gap: 0.8rem;
+}
+
+.skill-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 0.85rem;
+  padding: 1rem;
+  box-shadow: 0 12px 24px rgba(35, 28, 23, 0.08);
+  transform: translateY(8px);
+  opacity: 0;
+  animation: settle 320ms ease forwards;
+}
+
+.skill-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  align-items: baseline;
+}
+
+.skill-title {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.category-chip {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--teal);
+  background: rgba(30, 108, 100, 0.08);
+  border: 1px solid rgba(30, 108, 100, 0.22);
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.skill-description {
+  margin: 0.7rem 0 0.55rem;
+  color: var(--ink-soft);
+  line-height: 1.45;
+}
+
+.skill-path {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: #4f463d;
+}
+
+.resource-row {
+  margin-top: 0.65rem;
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.resource-pill {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  border-radius: 999px;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid #c8baa5;
+  background: #f8f1e5;
+  color: #5a4e41;
+}
+
+@keyframes settle {
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@media (max-width: 850px) {
+  .controls {
+    grid-template-columns: 1fr;
+  }
+
+  .skill-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

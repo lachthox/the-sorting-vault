@@ -1,0 +1,15 @@
+# Exclude quarantined and intake content from deployment payload.
+Limbo/**
+SkillsLobby/**
+
+# Build and cache artifacts.
+**/__pycache__/**
+**/*.pyc
+.git/**
+
+# Local reports and import lists.
+scan-report*.md
+routing-report*.md
+import-report*.md
+top_skill_repos_for_import.json
+top_skillsmd_repos.json
